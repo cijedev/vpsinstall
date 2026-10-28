@@ -1,0 +1,54 @@
+{
+  "domain": "example.com",
+  "hostname": "server.example.com",
+  "admin_email": "admin@example.com",
+  "admin_password": "change-me-now",
+  "timezone": "UTC",
+  "control_panel": "virtualmin",
+  "web_bundle": "LAMP",
+  "webmail": "roundcube",
+  "webmail_help": "roundcube | snappymail | cypht | usermin (Virtualmin only; 1Panel remaps usermin to roundcube)",
+  "php_extensions": [
+    "mysql",
+    "xml",
+    "mbstring",
+    "curl",
+    "zip",
+    "gd",
+    "intl",
+    "imap",
+    "bcmath",
+    "soap",
+    "opcache",
+    "cli",
+    "fpm"
+  ],
+  "mailbaby": {
+    "host": "relay.mailbaby.net",
+    "port": 25,
+    "username": "",
+    "password": ""
+  },
+  "vnc": {
+    "enabled": true,
+    "password": "vncpass1",
+    "display": 1,
+    "geometry": "1280x720",
+    "bind_localhost": false
+  },
+  "ssl": {
+    "enabled": true,
+    "staging": false
+  },
+  "onepanel": {
+    "port": 8888,
+    "username": "vpsadmin",
+    "password": "",
+    "entrance": "",
+    "install_dir": "/opt"
+  },
+  "create_admin_mailbox": true,
+  "send_test_mail_to": "",
+  "site_user": "",
+  "grant_sudo": true
+}
