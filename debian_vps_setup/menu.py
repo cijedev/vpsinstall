@@ -8,49 +8,65 @@ import sys
 from debian_vps_setup.config import SetupConfig, run_wizard
 from debian_vps_setup.console import error, heading, info, warn
 from debian_vps_setup.modules.verify import COMPONENTS
+from debian_vps_setup.pipeline import names as step_names
 from debian_vps_setup.runner import Runner
 from debian_vps_setup.state import InstallState
 
 MENU_ITEMS = (
     ("1", "Install / resume"),
-    ("2", "Troubleshoot components"),
-    ("3", "Re-test stack"),
-    ("4", "Show DNS helper"),
-    ("5", "Status (completed steps)"),
-    ("6", "System backup / restore"),
-    ("7", "Quit"),
+    ("2", "Run one feature"),
+    ("3", "Check configuration"),
+    ("4", "Secure this system"),
+    ("5", "Debug security lockouts"),
+    ("6", "Troubleshoot components"),
+    ("7", "Re-test stack"),
+    ("8", "Show DNS helper"),
+    ("9", "Status (completed steps)"),
+    ("10", "System backup / restore"),
+    ("11", "Quit"),
 )
 
 
 def cmd_menu(args: argparse.Namespace, runner: Runner, state: InstallState) -> int:
     if not sys.stdin.isatty():
-        error("menu requires a TTY; use wizard, run, test, dns, status, troubleshoot, backup, or restore")
+        error(
+            "menu requires a TTY; use wizard, run, check, harden, debug, test, "
+            "dns, status, troubleshoot, backup, or restore"
+        )
         return 2
     heading("Main menu")
-    info("Choose an action. Non-interactive commands still work as before.")
+    info("Choose an action. You do not need command-line arguments.")
     while True:
         print()
         for key, label in MENU_ITEMS:
             print(f"  {key}) {label}")
-        choice = _ask("Select", "1-7 / q").strip().lower()
-        if choice in {"7", "q", "quit"}:
+        choice = _ask("Select", "1-11 / q").strip().lower()
+        if choice in {"11", "q", "quit"}:
             return 0
         if choice in {"1", "i", "install"}:
             code = _menu_install(args, runner, state)
-        elif choice in {"2", "t", "troubleshoot"}:
+        elif choice in {"2", "feature", "features"}:
+            code = _menu_feature(args, runner, state)
+        elif choice in {"3", "check"}:
+            code = _menu_check(args, runner)
+        elif choice in {"4", "harden", "secure"}:
+            code = _menu_harden(args, runner)
+        elif choice in {"5", "debug"}:
+            code = _menu_debug(args, runner)
+        elif choice in {"6", "t", "troubleshoot"}:
             code = _menu_troubleshoot(args, runner)
-        elif choice in {"3", "test"}:
+        elif choice in {"7", "test"}:
             code = _menu_test(args, runner)
-        elif choice in {"4", "dns"}:
+        elif choice in {"8", "dns"}:
             code = _menu_dns(args, runner)
-        elif choice in {"5", "status"}:
+        elif choice in {"9", "status"}:
             from debian_vps_setup.cli import cmd_status
 
             code = cmd_status(state)
-        elif choice in {"6", "backup", "restore"}:
+        elif choice in {"10", "backup", "restore"}:
             code = _menu_backup(args, runner)
         else:
-            warn("Enter a number from 1 to 7")
+            warn("Enter a number from 1 to 11")
             continue
         if code not in (0, 1):
             warn(f"command exited with status {code}")
@@ -77,6 +93,101 @@ def _menu_install(args: argparse.Namespace, runner: Runner, state: InstallState)
     else:
         cfg = run_wizard()
     return cmd_run(cfg, args, runner, state)
+
+
+def _menu_feature(args: argparse.Namespace, runner: Runner, state: InstallState) -> int:
+    from debian_vps_setup.cli import cmd_run, try_load_saved_config
+
+    cfg = try_load_saved_config(args, required=True)
+    steps = step_names()
+    print()
+    for index, name in enumerate(steps, start=1):
+        print(f"  {index}) {name}")
+    print(f"  {len(steps) + 1}) Back")
+    pick = _ask("Feature", "number").strip().lower()
+    if pick in {str(len(steps) + 1), "b", "back"}:
+        return 0
+    if not pick.isdigit() or not 1 <= int(pick) <= len(steps):
+        error("unknown feature")
+        return 2
+    previous_only = args.only
+    previous_skip = args.skip
+    args.only = steps[int(pick) - 1]
+    args.skip = None
+    try:
+        return cmd_run(cfg, args, runner, state)
+    finally:
+        args.only = previous_only
+        args.skip = previous_skip
+
+
+def _menu_check(args: argparse.Namespace, runner: Runner) -> int:
+    from debian_vps_setup.cli import cmd_check, try_load_saved_config
+
+    cfg = try_load_saved_config(args, required=True)
+    return cmd_check(cfg, runner)
+
+
+def _menu_harden(args: argparse.Namespace, runner: Runner) -> int:
+    from debian_vps_setup.modules.harden import apply_harden, describe_harden, print_plan
+
+    plan = describe_harden(runner)
+    print_plan(plan)
+    pick = _ask("Select", "number").strip().lower()
+    if pick in {str(len(plan.actions) + 1), "b", "back", ""}:
+        return 0
+    if not pick.isdigit() or not 1 <= int(pick) <= len(plan.actions):
+        error("unknown harden action")
+        return 2
+    action = plan.actions[int(pick) - 1]
+    public_key = ""
+    user = "root"
+    value = ""
+    if action.kind == "ssh-key":
+        user = _ask("Unix user", "root").strip() or "root"
+        public_key = _ask("Public key", "ssh-ed25519 AAAA... comment").strip()
+    elif action.takes_value:
+        value = _ask(action.value_name or "Value").strip()
+    if action.kind in {"run", "flag"} and not args.yes:
+        answer = _ask("Run this harden action?", "y/N").strip().lower()
+        if answer not in {"y", "yes"}:
+            warn("aborted")
+            return 0
+    try:
+        result = apply_harden(
+            runner,
+            action=action.id,
+            public_key=public_key,
+            user=user,
+            flag=action.flag,
+            value=value,
+        )
+    except ValueError as exc:
+        error(str(exc))
+        return 2
+    if not result.ok:
+        error(result.detail)
+        return 1
+    info(result.detail)
+    return 0
+
+
+def _menu_debug(args: argparse.Namespace, runner: Runner) -> int:
+    from debian_vps_setup.cli import cmd_debug
+
+    code = cmd_debug(args, runner)
+    if not sys.stdin.isatty():
+        return code
+    print()
+    answer = _ask("Unban one address?", "y/N").strip().lower()
+    if answer not in {"y", "yes"}:
+        return code
+    jail = _ask("fail2ban jail", "sshd").strip() or "sshd"
+    address = _ask("IP address").strip()
+    from debian_vps_setup.modules.secure_debug import unban_address
+
+    finding = unban_address(runner, address, jail)
+    return 0 if finding.status != "fail" else 1
 
 
 def _menu_troubleshoot(args: argparse.Namespace, runner: Runner) -> int:

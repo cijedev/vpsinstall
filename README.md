@@ -149,6 +149,9 @@ Commands
 | `./setup.sh wizard` | Prompt, then install |
 | `./setup.sh run --config FILE --yes` | Unattended install |
 | `./setup.sh run --config FILE --dry-run` | Print actions only |
+| `./setup.sh check --config FILE` | Check that the saved config and services are set up |
+| `./setup.sh harden` | Secure the system from the menu (no arguments required) |
+| `./setup.sh debug` | Show fail2ban bans, SSH lockouts, and bad secure configs |
 | `./setup.sh test --config FILE` | Re-test the stack |
 | `./setup.sh dns --config FILE` | Print required DNS records |
 | `./setup.sh status` | Show completed steps |
@@ -172,14 +175,38 @@ Interactive menu
 The menu is a numbered loop (no extra TUI libraries). Items:
 
 1. Install / resume — wizard, or run from `/root/vps-setup.json`
-2. Troubleshoot components — one pipeline step or all
-3. Re-test stack — same as `test`
-4. Show DNS helper — same as `dns`
-5. Status (completed steps)
-6. System backup / restore helper
-7. Quit
+2. Run one feature — one pipeline step (`system`, `panel`, `domain`, `web`, `mail`, `ftp`, `ssl`, `webmail`, `vnc`) with no `--only` flag
+3. Check configuration — validate the saved config and re-check every component
+4. Secure this system — actions taken from `/root/scripts/harden/`, including **Add an SSH public key**
+5. Debug security lockouts — fail2ban bans, SSH lockout, and wrong sshd/jail settings, plus an unban prompt
+6. Troubleshoot components — one pipeline step or all
+7. Re-test stack — same as `test`
+8. Show DNS helper — same as `dns`
+9. Status (completed steps)
+10. System backup / restore helper
+11. Quit
 
-Scripts and CI should keep calling `run` / `test` with `--yes` (and `--config`). stdin that is not a TTY never opens the menu.
+Scripts and CI should keep calling `run` / `check` / `test` with `--yes` (and `--config`). stdin that is not a TTY never opens the menu.
+
+Secure this system
+------------------
+
+The harden script is the one kept at `/root/scripts/harden/` on cije.live. Copy that directory onto the VPS (same path). The menu reads `harden.sh` (or `harden`, `harden.py`, `main.sh`) and turns each long option into its own numbered action. You do not pass those flags yourself.
+
+**Add an SSH public key** is always available, even when the script directory is empty. It appends one OpenSSH public key to that user's `authorized_keys` (mode 600). If the script has an option such as `--ssh-key`, the same key is passed through after it is installed, so password logins can be turned off without locking you out. Paste the public key only.
+
+`./setup.sh harden` opens that same list on a TTY. `./setup.sh debug` prints the lockout report. On a TTY it then asks whether to unban one address from a fail2ban jail (default `sshd`).
+
+Debug security lockouts
+-----------------------
+
+`debug` does not change the host unless you unban an address. It reports:
+
+- fail2ban jail config, and on a live host the jails plus banned addresses
+- sshd settings (first value wins), including typos such as `PasswordAuthentification`
+- a lockout when password login is off and `/root/.ssh/authorized_keys` has no key
+- SSH directory and `authorized_keys` modes
+- on a live host, `sshd -t`, web server config tests, and `postfix check` when those tools exist
 
 Webmail choices
 ---------------
@@ -247,7 +274,7 @@ Local checks (this repository)
 python3 -m unittest discover -s tests -v
 ```
 
-These tests cover config validation, Mailbaby/Postfix file generation, 1Panel vs Virtualmin command lines, DNS output, webmail choices, backup/restore under `--root`, troubleshoot planning, the TTY menu, and a dry-run of the CLI. They do not install packages.
+These tests cover config validation, Mailbaby/Postfix file generation, 1Panel vs Virtualmin command lines, DNS output, webmail choices, backup/restore under `--root`, troubleshoot planning, the TTY menu, harden-script actions (including adding an SSH key), security debug, and a dry-run of the CLI. They do not install packages.
 
 License
 -------

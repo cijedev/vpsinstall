@@ -168,6 +168,9 @@ class CliFeatureTests(unittest.TestCase):
         self.assertIn("troubleshoot", out)
         self.assertIn("backup", out)
         self.assertIn("menu", out)
+        self.assertIn("check", out)
+        self.assertIn("harden", out)
+        self.assertIn("debug", out)
         self.assertIn("SnappyMail", out)
         self.assertIn("Cypht", out)
 
@@ -211,7 +214,10 @@ class CliFeatureTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_menu_quit(self):
-        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="7"):
+        from debian_vps_setup.menu import MENU_ITEMS
+
+        quit_key = MENU_ITEMS[-1][0]
+        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value=quit_key):
             self.assertEqual(main(["menu"]), 0)
 
     def test_menu_rejected_without_tty(self):

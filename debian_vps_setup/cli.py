@@ -44,10 +44,23 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default=None,
-        choices=("menu", "wizard", "run", "test", "dns", "status", "troubleshoot", "backup", "restore"),
+        choices=(
+            "menu",
+            "wizard",
+            "run",
+            "check",
+            "harden",
+            "debug",
+            "test",
+            "dns",
+            "status",
+            "troubleshoot",
+            "backup",
+            "restore",
+        ),
         help=(
             "menu (default on a TTY), wizard, run (default non-interactive), "
-            "test, dns, status, troubleshoot, backup, or restore"
+            "check, harden, debug, test, dns, status, troubleshoot, backup, or restore"
         ),
     )
     parser.add_argument("--config", help="JSON config file (see config.example.json)")
@@ -97,6 +110,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--site-user", help="Unix user that owns the site (home is the website account)")
     parser.add_argument("--sudo-password", help="Password for the site sudo user")
     parser.add_argument("--no-sudo", action="store_true", help="do not grant sudo to the site user")
+    parser.add_argument(
+        "--harden-action",
+        help="harden menu action id (ssh-key, run, or flag:name). The menu asks instead.",
+    )
+    parser.add_argument("--ssh-public-key", help="OpenSSH public key for the harden SSH-key action")
+    parser.add_argument("--ssh-user", default="root", help="unix user that receives the SSH public key")
+    parser.add_argument("--harden-flag", help="long option from the harden script, for example --port")
+    parser.add_argument("--harden-value", help="value for --harden-flag when that option takes one")
+    parser.add_argument("--unban", help="IP address to remove from a fail2ban jail")
+    parser.add_argument("--jail", default="sshd", help="fail2ban jail for --unban")
     return parser
 
 
@@ -227,6 +250,66 @@ def cmd_test(cfg: SetupConfig, runner: Runner) -> int:
     heading("Summary")
     info(f"{len(checks) - len(failed)} passed, {len(failed)} failed")
     return 1 if failed else 0
+
+
+def cmd_check(cfg: SetupConfig, runner: Runner) -> int:
+    """Validate the saved config and re-check every installed component."""
+    heading("Check configuration")
+    problems = cfg.validate()
+    for item in problems:
+        error(item)
+    checks = run_checks(cfg, runner)
+    failed = [check for check in checks if not check.passed]
+    heading("Summary")
+    info(f"config problems: {len(problems)}")
+    info(f"service checks: {len(checks) - len(failed)} passed, {len(failed)} failed")
+    info("For fail2ban bans and SSH lockouts, open Debug security lockouts.")
+    if problems or failed:
+        return 1
+    ok("configuration checks passed")
+    return 0
+
+
+def cmd_harden(args: argparse.Namespace, runner: Runner) -> int:
+    from debian_vps_setup.modules.harden import apply_harden
+
+    action = args.harden_action or ""
+    if not action:
+        if sys.stdin.isatty():
+            from debian_vps_setup.menu import _menu_harden
+
+            return _menu_harden(args, runner)
+        error("pass --harden-action, or run the menu on a TTY")
+        return 2
+    try:
+        result = apply_harden(
+            runner,
+            action=action,
+            public_key=args.ssh_public_key or "",
+            user=args.ssh_user or "root",
+            flag=args.harden_flag or "",
+            value=args.harden_value or "",
+        )
+    except ValueError as exc:
+        error(str(exc))
+        return 2
+    if not result.ok:
+        error(result.detail)
+        return 1
+    ok(result.detail)
+    return 0
+
+
+def cmd_debug(args: argparse.Namespace, runner: Runner) -> int:
+    from debian_vps_setup.modules.secure_debug import debug_security, print_report, unban_address
+
+    report = debug_security(runner)
+    print_report(report)
+    if args.unban:
+        finding = unban_address(runner, args.unban, args.jail or "sshd")
+        if finding.status == "fail":
+            return 1
+    return 0 if report.ok else 1
 
 
 def cmd_run(cfg: SetupConfig, args: argparse.Namespace, runner: Runner, state: InstallState) -> int:
@@ -391,6 +474,19 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return cmd_status(state)
     if command == "restore":
         return cmd_restore(args, runner)
+    if command == "harden":
+        return cmd_harden(args, runner)
+    if command == "debug":
+        return cmd_debug(args, runner)
+    if command == "check":
+        source = _config_source(args)
+        if source and not args.config:
+            overlay = argparse.Namespace(**vars(args))
+            overlay.config = source
+            cfg = config_from_args(overlay)
+        else:
+            cfg = config_from_args(args)
+        return cmd_check(cfg, runner)
     if command == "backup":
         cfg = try_load_saved_config(args, required=False)
         return cmd_backup(cfg, args, runner)
